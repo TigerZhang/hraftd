@@ -20,7 +20,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
+//	"github.com/hashicorp/raft-boltdb"
+	"github.com/icexin/raft-leveldb"
 )
 
 const (
@@ -95,13 +96,23 @@ func (s *Store) Open(enableSingle bool) error {
 	}
 
 	// Create the log store and stable store.
-	logStore, err := raftboltdb.NewBoltStore(filepath.Join(s.RaftDir, "raft.db"))
+//	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(s.RaftDir, "raft-stable.db"))
+//	if err != nil {
+//		return fmt.Errorf("new bolt store: %s", err)
+//	}
+
+	stableStore, err := raftleveldb.NewStore(filepath.Join(s.RaftDir, "raft-level-stable.db"))
 	if err != nil {
-		return fmt.Errorf("new bolt store: %s", err)
+		return fmt.Errorf("New leveldb store: %s", err)
+	}
+
+	logStore, err := raftleveldb.NewStore(filepath.Join(s.RaftDir, "raft-level-log.db"))
+	if err != nil {
+		return fmt.Errorf("New leveldb store: %s", err)
 	}
 
 	// Instantiate the Raft systems.
-	ra, err := raft.NewRaft(config, (*fsm)(s), logStore, logStore, snapshots, peerStore, transport)
+	ra, err := raft.NewRaft(config, (*fsm)(s), logStore, stableStore, snapshots, peerStore, transport)
 	if err != nil {
 		return fmt.Errorf("new raft: %s", err)
 	}

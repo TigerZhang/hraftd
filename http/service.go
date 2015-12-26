@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"strconv"
 )
 
 // Store is the interface Raft-backed key-value stores must implement.
@@ -154,11 +156,20 @@ func (s *Service) handleKeyRequest(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 		}
 		for k, v := range m {
+			if strings.Compare(k, "_test_") == 0 {
+				for i := 0; i < 100000; i++ {
+					s.store.Set("_test_" + strconv.Itoa(i), "_value_" + strconv.Itoa(i))
+				}
+			}
 			if err := s.store.Set(k, v); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 		}
+
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, "OK")
+		return
 
 	case "DELETE":
 		k := getKey()
