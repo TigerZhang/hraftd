@@ -11,6 +11,7 @@ import (
 
 	"github.com/otoolep/hraftd/http"
 	"github.com/otoolep/hraftd/store"
+	redisd "github.com/otoolep/hraftd/redis"
 )
 
 const (
@@ -67,6 +68,9 @@ func main() {
 			log.Fatalf("failed to join node at %s: %s", joinAddr, err.Error())
 		}
 	}
+
+	r := redisd.New("127.0.0.1", 6389, s)
+	r.Start()
 
 	log.Println("hraft started successfully")
 
