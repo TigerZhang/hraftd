@@ -19,9 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/raft"
+	"github.com/TigerZhang/raft"
 //	"github.com/hashicorp/raft-boltdb"
-	"github.com/icexin/raft-leveldb"
+	"github.com/TigerZhang/raft-leveldb"
+	"github.com/siddontang/ledisdb/ledis"
+	lediscfg "github.com/siddontang/ledisdb/config"
 )
 
 const (
@@ -42,6 +44,8 @@ type Store struct {
 
 	mu sync.Mutex
 	m  map[string]string // The key-value store for the system.
+
+	db *ledis.DB
 
 	raft *raft.Raft // The consensus mechanism
 
@@ -112,19 +116,37 @@ func (s *Store) Open(enableSingle bool) error {
 	}
 
 	// Instantiate the Raft systems.
-	ra, err := raft.NewRaft(config, (*fsm)(s), logStore, stableStore, snapshots, peerStore, transport)
+	ra, err := raft.NewRaft(config, (*fsmlevel)(s), logStore, stableStore, snapshots, peerStore, transport)
 	if err != nil {
 		return fmt.Errorf("new raft: %s", err)
 	}
 	s.raft = ra
+
+	cfg := lediscfg.NewConfigDefault()
+	cfg.DataDir = filepath.Join(s.RaftDir, "fsm-level.db")
+	l, _ := ledis.Open(cfg)
+	db, _ := l.Select(0)
+	s.db = db
+
 	return nil
 }
 
 // Get returns the value for the given key.
 func (s *Store) Get(key string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.m[key], nil
+//	s.mu.Lock()
+//	defer s.mu.Unlock()
+//	return s.m[key], nil
+	k := []byte(key)
+//	s.logger.Printf("k", k)
+	value, err := s.db.Get(k)
+	if err == nil {
+//		s.logger.Printf("db get k %s v %s", key, string(value))
+		return string(value), err
+	} else {
+		s.logger.Printf("db get error %v k %s", err, key)
+	}
+
+	return "", err
 }
 
 // Set sets the value for the given key.
@@ -184,6 +206,51 @@ func (s *Store) Join(addr string) error {
 		return f.Error()
 	}
 	s.logger.Printf("node at %s joined successfully", addr)
+	return nil
+}
+
+type fsmlevel Store
+
+func (f *fsmlevel) Apply(l *raft.Log) interface{} {
+	var c command
+	if err := json.Unmarshal(l.Data, &c); err != nil {
+		panic(fmt.Sprintf("failed to unmarshal command: %s", err.Error()))
+	}
+
+	switch c.Op {
+	case "set":
+		return f.applySet(c.Key, c.Value)
+	case "delete":
+		return f.applyDelete(c.Key)
+	default:
+		panic(fmt.Sprint("unrecognized command op: %s", c.Op))
+	}
+}
+
+func (f *fsmlevel) applySet(key, value string) interface{} {
+//	f.logger.Printf("fsmlevel set k %s v %s", key, value)
+	if err := f.db.Set([]byte(key), []byte(value)); err != nil {
+		f.logger.Printf("failed to fsmlevel set %v", err)
+		return err
+	}
+	return nil
+}
+
+func (f *fsmlevel) applyDelete(key string) interface{} {
+//	f.logger.Printf("fsmlevel del k %s", key)
+	_, err := f.db.Del([]byte(key))
+	if err != nil {
+		f.logger.Printf("failed to fsmlevel del %v", err)
+		return err
+	}
+	return nil
+}
+
+func (f *fsmlevel) Snapshot() (raft.FSMSnapshot, error) {
+	return &fsmSnapshot{}, nil
+}
+
+func (f *fsmlevel) Restore(rc io.ReadCloser) error {
 	return nil
 }
 
