@@ -17,6 +17,9 @@ import (
 const (
 	DefaultHTTPAddr = ":11000"
 	DefaultRaftAddr = ":12000"
+
+	DefaultRedisBindHost = "127.0.0.1"
+	DefaultRedisPort = 6389
 )
 
 // Parameters
@@ -24,9 +27,14 @@ var httpAddr string
 var raftAddr string
 var joinAddr string
 
+var redisBindHost string
+var redisPort int
+
 func init() {
 	flag.StringVar(&httpAddr, "haddr", DefaultHTTPAddr, "Set the HTTP bind address")
 	flag.StringVar(&raftAddr, "raddr", DefaultRaftAddr, "Set Raft bind address")
+	flag.StringVar(&redisBindHost, "redisBind", DefaultRedisBindHost, "Set the redis bind host")
+	flag.IntVar(&redisPort, "redisPort", DefaultRedisPort, "Set the redis bind port")
 	flag.StringVar(&joinAddr, "join", "", "Set join address, if any")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] <raft-data-path> \n", os.Args[0])
@@ -69,7 +77,7 @@ func main() {
 		}
 	}
 
-	r := redisd.New("127.0.0.1", 6389, s)
+	r := redisd.New(redisBindHost, redisPort, s)
 	r.Start()
 
 	log.Println("hraft started successfully")
