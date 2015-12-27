@@ -79,3 +79,14 @@ Automatically forwarding requests to set keys to the current leader is not imple
 
 ## Credits
 Thanks to the authors of [raftd](https://github.com/goraft/raftd) for providing the inspiration for this system. The current use of Raft by [InfluxDB](https://github.com/influxdb/influxdb) was also helpful.
+
+## Redis Support
+FSM based on [ledis](https://github.com/siddontang/ledisdb).
+
+```
+redis-cli -p 6389 set key1 value1
+redis-cli -p 6389 get key1
+```
+
+### TODO
+* snapshot support
