@@ -18,12 +18,16 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+//	"encoding/binary"
+//	"bufio"
 
 	"github.com/TigerZhang/raft"
 //	"github.com/hashicorp/raft-boltdb"
 	"github.com/TigerZhang/raft-leveldb"
 	"github.com/siddontang/ledisdb/ledis"
+	ledisstore "github.com/siddontang/ledisdb/store"
 	lediscfg "github.com/siddontang/ledisdb/config"
+//	"github.com/siddontang/go/snappy"
 )
 
 const (
@@ -46,6 +50,7 @@ type Store struct {
 	m  map[string]string // The key-value store for the system.
 
 	db *ledis.DB
+	ldb *ledis.Ledis
 
 	raft *raft.Raft // The consensus mechanism
 
@@ -115,6 +120,13 @@ func (s *Store) Open(enableSingle bool) error {
 		return fmt.Errorf("New leveldb store: %s", err)
 	}
 
+	cfg := lediscfg.NewConfigDefault()
+	cfg.DataDir = filepath.Join(s.RaftDir, "fsm-level.db")
+	ldb, _ := ledis.Open(cfg)
+	db, _ := ldb.Select(0)
+	s.db = db
+	s.ldb = ldb
+
 	// Instantiate the Raft systems.
 	ra, err := raft.NewRaft(config, (*fsmlevel)(s), logStore, stableStore, snapshots, peerStore, transport)
 	if err != nil {
@@ -122,11 +134,6 @@ func (s *Store) Open(enableSingle bool) error {
 	}
 	s.raft = ra
 
-	cfg := lediscfg.NewConfigDefault()
-	cfg.DataDir = filepath.Join(s.RaftDir, "fsm-level.db")
-	l, _ := ledis.Open(cfg)
-	db, _ := l.Select(0)
-	s.db = db
 
 	return nil
 }
@@ -136,11 +143,10 @@ func (s *Store) Get(key string) (string, error) {
 //	s.mu.Lock()
 //	defer s.mu.Unlock()
 //	return s.m[key], nil
+
 	k := []byte(key)
-//	s.logger.Printf("k", k)
 	value, err := s.db.Get(k)
 	if err == nil {
-//		s.logger.Printf("db get k %s v %s", key, string(value))
 		return string(value), err
 	} else {
 		s.logger.Printf("db get error %v k %s", err, key)
@@ -210,6 +216,18 @@ func (s *Store) Join(addr string) error {
 	return nil
 }
 
+func (s *Store) Leave(addr string) error {
+	s.logger.Printf("received leave request for remote node as %s", addr)
+
+	f := s.raft.RemovePeer(addr)
+	if f.Error() != nil {
+		return f.Error()
+	}
+
+	s.logger.Printf("node at %s left", addr)
+	return nil
+}
+
 func (s *Store) GetRaft() *raft.Raft {
 	return s.raft
 }
@@ -252,11 +270,39 @@ func (f *fsmlevel) applyDelete(key string) interface{} {
 }
 
 func (f *fsmlevel) Snapshot() (raft.FSMSnapshot, error) {
-	return &fsmSnapshot{}, nil
+//	f.ldb.DumpFile(filepath.Join(f.RaftDir, "fsmlevel-dump"))
+	// TODO
+	// 1. create a snapshot in leveldb/ledisdb
+	snap, err := f.ldb.Snapshot()
+	// 2. return the snapshot ID
+	return &fsmlevelSnapshot{snap: snap, ldb: f.ldb}, err
 }
 
 func (f *fsmlevel) Restore(rc io.ReadCloser) error {
+	f.logger.Printf("Start restore")
+	_, err := f.ldb.LoadDump(rc)
+	return err
+}
+
+type fsmlevelSnapshot struct {
+	store map[string]string
+	snap *ledisstore.Snapshot
+	ldb *ledis.Ledis
+}
+
+func (f *fsmlevelSnapshot) Persist(sink raft.SnapshotSink) error {
+	err := f.ldb.Dump(sink)
+
+	if err != nil {
+		sink.Cancel()
+		return err
+	}
+
 	return nil
+}
+
+func (f *fsmlevelSnapshot) Release() {
+	f.snap.Close()
 }
 
 type fsm Store
