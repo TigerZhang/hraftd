@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	redis "github.com/dotcloud/go-redis-server"
+	"github.com/TigerZhang/raft"
+	redis "github.com/TigerZhang/go-redis-server"
 )
 
 // Store is the interface Raft-backed key-value stores must implement.
@@ -26,19 +27,22 @@ type Service struct {
 	host string
 	port int
 	store Store
+	raft *raft.Raft
 }
 
-func New(host string, port int, store Store) *Service {
+func New(host string, port int, store Store, raft *raft.Raft) *Service {
 	return &Service{
 		host:	host,
 		port:	port,
 		store:	store,
+		raft:	raft,
 	}
 }
 
 type MyHandler struct {
 	values map[string] string
 	store Store
+	raft *raft.Raft
 }
 
 func (h *MyHandler) Get(key string) (string, error) {
@@ -61,7 +65,11 @@ func (h *MyHandler) Ping() (string, error) {
 	return "pong", nil
 }
 
-func (s *Service) Start() {
+func (h *MyHandler) Leader() (string, error) {
+	return h.raft.Leader(), nil
+}
+
+func (s *Service) Start(raft *raft.Raft) {
 	defer func() {
 		if msg := recover(); msg != nil {
 			fmt.Printf("Panic: %v\n", msg)
@@ -70,7 +78,7 @@ func (s *Service) Start() {
 
 	log.Println("redis listen", s.host, s.port)
 
-	myhandler := &MyHandler{values: make(map[string] string), store: s.store}
+	myhandler := &MyHandler{values: make(map[string] string), store: s.store, raft: raft}
 //	myhandler := redis.NewDefaultHandler()
 	srv, err := redis.NewServer(redis.DefaultConfig().Host(s.host).Port(s.port).Handler(myhandler))
 	if err != nil {

@@ -152,7 +152,8 @@ func (s *Store) Get(key string) (string, error) {
 // Set sets the value for the given key.
 func (s *Store) Set(key, value string) error {
 	if s.raft.State() != raft.Leader {
-		return fmt.Errorf("not leader")
+		leader := s.raft.Leader()
+		return fmt.Errorf("not leader " + leader)
 	}
 
 	c := &command{
@@ -207,6 +208,10 @@ func (s *Store) Join(addr string) error {
 	}
 	s.logger.Printf("node at %s joined successfully", addr)
 	return nil
+}
+
+func (s *Store) GetRaft() *raft.Raft {
+	return s.raft
 }
 
 type fsmlevel Store

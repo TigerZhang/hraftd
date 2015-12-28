@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/otoolep/hraftd/http"
-	"github.com/otoolep/hraftd/store"
-	redisd "github.com/otoolep/hraftd/redis"
+	"github.com/TigerZhang/hraftd/http"
+	"github.com/TigerZhang/hraftd/store"
+	redisd "github.com/TigerZhang/hraftd/redis"
 )
 
 const (
@@ -77,8 +77,8 @@ func main() {
 		}
 	}
 
-	r := redisd.New(redisBindHost, redisPort, s)
-	r.Start()
+	r := redisd.New(redisBindHost, redisPort, s, s.GetRaft())
+	r.Start(s.GetRaft())
 
 	log.Println("hraft started successfully")
 
