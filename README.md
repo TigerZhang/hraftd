@@ -88,5 +88,33 @@ redis-cli -p 6389 set key1 value1
 redis-cli -p 6389 get key1
 ```
 
+### Benchmark
+```
+MacBook Pro Retina 15' 2015 mid
+2.5 GHz Intel Core i7
+16 GB 1600 MHz DDR3
+```
+
+```
+single node
+✗ for c in 1 20 50 100; do echo "-c $c"; ~/redis-2.8.2/src/redis-benchmark -n 100000 -t set,get -c $c -p 6389 -q; done
+-c 1
+SET: 17556.18 requests per second
+GET: 16747.61 requests per second
+
+-c 20
+SET: 47438.33 requests per second
+GET: 43383.95 requests per second
+
+-c 50
+SET: 48146.37 requests per second
+GET: 41736.23 requests per second
+
+-c 100
+SET: 47846.89 requests per second
+GET: 40833.00 requests per second
+```
+
 ### TODO
-* snapshot support
+* snapshot support (DONE)
+
