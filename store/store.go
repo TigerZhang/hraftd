@@ -24,9 +24,9 @@ import (
 	"github.com/TigerZhang/raft"
 //	"github.com/hashicorp/raft-boltdb"
 	"github.com/TigerZhang/raft-leveldb"
-	"github.com/siddontang/ledisdb/ledis"
-	ledisstore "github.com/siddontang/ledisdb/store"
-	lediscfg "github.com/siddontang/ledisdb/config"
+	"github.com/TigerZhang/ledisdb/ledis"
+	ledisstore "github.com/TigerZhang/ledisdb/store"
+	lediscfg "github.com/TigerZhang/ledisdb/config"
 //	"github.com/siddontang/go/snappy"
 )
 
