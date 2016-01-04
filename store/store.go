@@ -121,8 +121,13 @@ func (s *Store) Open(enableSingle bool) error {
 	}
 
 	cfg := lediscfg.NewConfigDefault()
-	cfg.DataDir = filepath.Join(s.RaftDir, "fsm-level.db")
-	ldb, _ := ledis.Open(cfg)
+	cfg.DBName = "rocksdb"
+	dbpath := fmt.Sprintf("fsm-%s.db", cfg.DBName)
+	cfg.DataDir = filepath.Join(s.RaftDir, dbpath)
+	ldb, err := ledis.Open(cfg)
+	if err != nil {
+		return fmt.Errorf("ledis open failed: %s", err)
+	}
 	db, _ := ldb.Select(0)
 	s.db = db
 	s.ldb = ldb
@@ -239,6 +244,8 @@ func (f *fsmlevel) Apply(l *raft.Log) interface{} {
 	if err := json.Unmarshal(l.Data, &c); err != nil {
 		panic(fmt.Sprintf("failed to unmarshal command: %s", err.Error()))
 	}
+
+//	f.logger.Printf("[DEBUG] fsmlevel apply log %d", l.Index)
 
 	switch c.Op {
 	case "set":
