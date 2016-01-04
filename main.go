@@ -12,6 +12,8 @@ import (
 	"github.com/TigerZhang/hraftd/http"
 	"github.com/TigerZhang/hraftd/store"
 	redisd "github.com/TigerZhang/hraftd/redis"
+
+	_ "net/http/pprof"
 )
 
 const (
@@ -43,6 +45,10 @@ func init() {
 }
 
 func main() {
+    go func() {
+        log.Println(http.ListenAndServe("localhost:6060", nil))
+    }()
+
 	flag.Parse()
 
 	if flag.NArg() == 0 {
