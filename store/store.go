@@ -188,6 +188,10 @@ func (s *Store) Set(key, value string) error {
 		return err
 	}
 
+	if err = f.Error(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -210,6 +214,10 @@ func (s *Store) Delete(key string) error {
 
 	f := s.raft.Apply(b, raftTimeout)
 	if err, ok := f.(error); ok {
+		return err
+	}
+
+	if err = f.Error(); err != nil {
 		return err
 	}
 
