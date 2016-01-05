@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+	"strings"
 //	"encoding/binary"
 //	"bufio"
 
@@ -32,7 +33,7 @@ import (
 
 const (
 	retainSnapshotCount = 2
-	raftTimeout         = 10 * time.Second
+	raftTimeout         = 3 * time.Second
 )
 
 type command struct {
@@ -177,6 +178,11 @@ func (s *Store) Set(key, value string) error {
 		return err
 	}
 
+	// FIXME: for data type like sets,
+	// if there is an item in the set already,
+	// it's better to ignore the sadd operation to
+	// prevent creating a new redundant log
+
 	f := s.raft.Apply(b, raftTimeout)
 	if err, ok := f.(error); ok {
 		return err
@@ -199,6 +205,8 @@ func (s *Store) Delete(key string) error {
 	if err != nil {
 		return err
 	}
+
+	// FIXME: there ia a chance to ignore redundant delete operation
 
 	f := s.raft.Apply(b, raftTimeout)
 	if err, ok := f.(error); ok {
@@ -237,6 +245,22 @@ func (s *Store) GetRaft() *raft.Raft {
 	return s.raft
 }
 
+func (s *Store) SAdd(key, value string) (int, error) {
+	skv := fmt.Sprintf("t,%s,%s", key, value)
+	//	FIXME: return the real number
+	return 1, s.Set(skv, "1")
+}
+
+func (s *Store) SRem(key, value string) (int, error) {
+	skv := fmt.Sprintf("t,%s,%s", key, value)
+	//	FIXME: return the real number
+	return 1, s.Set(skv, "0")
+}
+
+func (s *Store) SMembers(key string) ([][]byte, error) {
+	return s.db.SMembers([]byte(key))
+}
+
 type fsmlevel Store
 
 func (f *fsmlevel) Apply(l *raft.Log) interface{} {
@@ -249,12 +273,55 @@ func (f *fsmlevel) Apply(l *raft.Log) interface{} {
 
 	switch c.Op {
 	case "set":
-		return f.applySet(c.Key, c.Value)
+		if strings.HasPrefix(c.Key, "t,") {
+			skv := strings.Split(c.Key, ",")
+			if len(skv) == 3 {
+				if c.Value == "0" {
+					return f.applySAdd(skv[1], skv[2])
+				} else {
+					return f.applySAdd(skv[1], skv[2])
+				}
+			}
+		} else {
+			return f.applySet(c.Key, c.Value)
+		}
 	case "delete":
-		return f.applyDelete(c.Key)
+		if strings.HasPrefix(c.Key, "t,") {
+			skv := strings.Split(c.Key, ",")
+			if len(skv) == 3 {
+				return f.applySRem(skv[1], skv[2])
+			}
+		} else {
+			return f.applyDelete(c.Key)
+		}
 	default:
 		panic(fmt.Sprint("unrecognized command op: %s", c.Op))
 	}
+
+	return nil
+}
+
+func (f *fsmlevel) applySAdd(key, value string) interface{} {
+	if num, err := f.db.SAdd([]byte(key), []byte(value)); err != nil {
+		f.logger.Print("failed to fsmlevel sadd %v", err)
+		return err
+	} else {
+//		f.logger.Print("sadd ", num)
+		num = num
+	}
+	return nil
+}
+
+func (f *fsmlevel) applySRem(key, value string) interface{} {
+	if num, err := f.db.SRem([]byte(key), []byte(value)); err != nil {
+		f.logger.Print("failed to fsmlevel srem %v", err)
+		return err
+	} else {
+//		f.logger.Print("srem ", num)
+		num = num
+	}
+
+	return nil
 }
 
 func (f *fsmlevel) applySet(key, value string) interface{} {

@@ -19,6 +19,10 @@ type Store interface {
 	// Delete removes the given key, via distributed consensus.
 	Delete(key string) error
 
+	SAdd(key, value string) (int, error)
+	SRem(key, value string) (int, error)
+	SMembers(key string) ([][]byte, error)
+
 	// Join joins the node, reachable at addr, to the cluster.
 	Join(addr string) error
 }
@@ -61,12 +65,24 @@ func (h *MyHandler) Del(key string) error {
 	return h.store.Delete(key)
 }
 
-func (h *MyHandler) Ping() (string, error) {
-	return "pong", nil
+func (h *MyHandler) Ping() ([]byte, error) {
+	return []byte("PONG"), nil
 }
 
 func (h *MyHandler) Leader() (string, error) {
 	return h.raft.Leader(), nil
+}
+
+func (h *MyHandler) SMembers(key string) ([][]byte, error) {
+	return h.store.SMembers(key)
+}
+
+func (h *MyHandler) SAdd(key, value string) (int, error) {
+	return h.store.SAdd(key, value)
+}
+
+func (h *MyHandler) SRem(key, value string) (int, error) {
+	return h.store.SRem(key, value)
 }
 
 func (s *Service) Start(raft *raft.Raft) {
