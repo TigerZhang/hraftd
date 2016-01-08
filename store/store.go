@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 	"strings"
+	"strconv"
 //	"encoding/binary"
 //	"bufio"
 
@@ -269,6 +270,26 @@ func (s *Store) SMembers(key string) ([][]byte, error) {
 	return s.db.SMembers([]byte(key))
 }
 
+func (s *Store) ZAdd(key []byte, args ...(ledis.ScorePair)) (int64, error) {
+	score := args[0].Score
+	member := args[0].Member
+	zkv := fmt.Sprintf("z,%s,%d,%s", string(key), score, string(member))
+	// FIXME: return the real number
+	return 1, s.Set(zkv, "1")
+}
+
+func (s *Store) ZCard(key []byte) (int64, error) {
+	return s.db.ZCard(key)
+}
+
+func (s *Store) ZRange(key []byte, start int, stop int) ([]ledis.ScorePair, error) {
+	return s.db.ZRange(key, start, stop)
+}
+
+func (s *Store) ZRangeByScore(key []byte, min int64, max int64, offset int, count int) ([]ledis.ScorePair, error) {
+	return s.db.ZRangeByScore(key, min, max, offset, count)
+}
+
 type fsmlevel Store
 
 func (f *fsmlevel) Apply(l *raft.Log) interface{} {
@@ -285,9 +306,21 @@ func (f *fsmlevel) Apply(l *raft.Log) interface{} {
 			skv := strings.Split(c.Key, ",")
 			if len(skv) == 3 {
 				if c.Value == "0" {
-					return f.applySAdd(skv[1], skv[2])
+					return f.applySRem(skv[1], skv[2])
 				} else {
 					return f.applySAdd(skv[1], skv[2])
+				}
+			}
+		} else if strings.HasPrefix(c.Key, "z,") {
+			zkv := strings.Split(c.Key, ",")
+			if len(zkv) == 4 {
+				if c.Value == "0" {
+				} else {
+					i, err := strconv.ParseInt(zkv[2], 10, 64)
+					if err != nil {
+						panic(fmt.Sprintf("failed to parse score: %s", err.Error()))
+					}
+					return f.applyZAdd(zkv[1], i, zkv[3])
 				}
 			}
 		} else {
@@ -304,6 +337,17 @@ func (f *fsmlevel) Apply(l *raft.Log) interface{} {
 		}
 	default:
 		panic(fmt.Sprint("unrecognized command op: %s", c.Op))
+	}
+
+	return nil
+}
+
+func (f *fsmlevel) applyZAdd(key string, score int64, value string) interface{} {
+	sp := ledis.ScorePair{Score: score, Member: []byte(value)}
+	if num, err := f.db.ZAdd([]byte(key), sp); err != nil {
+		return err
+	} else {
+		num = num
 	}
 
 	return nil

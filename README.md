@@ -7,6 +7,16 @@ hraftd is a reference example use of the [Hashicorp Raft implementation](https:/
 
 A simple example system like hraftd makes it easy to study Raft in general, and Hashicorp's implementation in particular.
 
+## Build on Mac
+
+```
+brew install snappy
+brew install lz4
+
+source dev.sh
+make
+```
+
 ## Reading and Writing Keys
 
 Like raftd, the implementation is a very simple key-value store. You can set a key like so:

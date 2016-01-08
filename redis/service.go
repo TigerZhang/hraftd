@@ -3,9 +3,11 @@ package redisd
 import (
 	"fmt"
 	"log"
+	"strconv"
 
 	"github.com/TigerZhang/raft"
 	redis "github.com/TigerZhang/go-redis-server"
+	"github.com/TigerZhang/ledisdb/ledis"
 )
 
 // Store is the interface Raft-backed key-value stores must implement.
@@ -22,6 +24,11 @@ type Store interface {
 	SAdd(key, value string) (int, error)
 	SRem(key, value string) (int, error)
 	SMembers(key string) ([][]byte, error)
+
+	ZAdd(key []byte, args ...(ledis.ScorePair)) (int64, error)
+	ZCard(key []byte) (int64, error)
+	ZRange(key []byte, start int, stop int) ([]ledis.ScorePair, error)
+	ZRangeByScore(key []byte, min int64, max int64, offset int, count int) ([]ledis.ScorePair, error)
 
 	// Join joins the node, reachable at addr, to the cluster.
 	Join(addr string) error
@@ -83,6 +90,40 @@ func (h *MyHandler) SAdd(key, value string) (int, error) {
 
 func (h *MyHandler) SRem(key, value string) (int, error) {
 	return h.store.SRem(key, value)
+}
+
+func (h *MyHandler) ZAdd(key, score, value string) (int, error) {
+	i, err := strconv.ParseInt(score, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	sp := ledis.ScorePair{Score: i, Member: []byte(value)}
+	num, err := h.store.ZAdd([]byte(key), sp)
+	return int(num), err
+}
+
+func (h *MyHandler) ZCard(key string) (int, error) {
+	num, err := h.store.ZCard([]byte(key))
+	return int(num), err
+}
+
+func (h *MyHandler) ZRange(key, start, stop string) ([][]byte, error){
+	starti, err := strconv.ParseInt(start, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	stopi, err := strconv.ParseInt(stop, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([][]byte, 0, 16)
+	sp, err := h.store.ZRange([]byte(key), int(starti), int(stopi))
+//	fmt.Printf("zrange result: %v", sp)
+	for _, v := range sp {
+		result = append(result, v.Member)
+	}
+	return result, err
 }
 
 func (s *Service) Start(raft *raft.Raft) {

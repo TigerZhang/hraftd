@@ -12,6 +12,9 @@ import (
 	"strings"
 
 	"strconv"
+
+	"github.com/TigerZhang/raft"
+	"fmt"
 )
 
 // Store is the interface Raft-backed key-value stores must implement.
@@ -30,6 +33,8 @@ type Store interface {
 
 	// Leave leaves the node
 	Leave(addr string) error
+
+	GetRaft() *raft.Raft
 }
 
 // Service provides HTTP service.
@@ -86,6 +91,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleJoin(w, r)
 	} else if r.URL.Path == "/leave" {
 		s.handleLeave(w, r)
+	} else if strings.HasPrefix(r.URL.Path, "/xdr") {
+		s.handleXdr(w, r)
 	} else {
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -147,6 +154,45 @@ func (s *Service) handleLeave(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
 		return
+	}
+}
+
+func (s *Service) handleXdr(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		switch parts[2] {
+		case "log":
+			if len(parts) < 4 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			logid, err := strconv.ParseUint(parts[3], 10, 64)
+
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(err.Error()))
+				return
+			}
+
+			ra := s.store.GetRaft()
+			if log, err := ra.GetLog(logid); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+				return
+			} else {
+//				logstr := fmt.Sprint(log)
+				l := len(log.Data)
+				fmt.Printf("len: %d\n", l)
+				fmt.Fprintf(w, "i %d t %d t %d d %s", log.Index, log.Term, log.Type, log.Data[:])
+			}
+		}
 	}
 }
 
