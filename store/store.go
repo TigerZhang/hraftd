@@ -22,6 +22,8 @@ import (
 	"strconv"
 //	"encoding/binary"
 //	"bufio"
+	"math"
+	"errors"
 
 	"github.com/TigerZhang/raft"
 //	"github.com/hashicorp/raft-boltdb"
@@ -30,12 +32,26 @@ import (
 	ledisstore "github.com/TigerZhang/ledisdb/store"
 	lediscfg "github.com/TigerZhang/ledisdb/config"
 //	"github.com/siddontang/go/snappy"
+	"github.com/siddontang/go/hack"
 )
 
 const (
 	retainSnapshotCount = 2
 	raftTimeout         = 3 * time.Second
 )
+
+var (
+	ErrEmptyCommand          = errors.New("empty command")
+	ErrNotFound              = errors.New("command not found")
+	ErrNotAuthenticated      = errors.New("not authenticated")
+	ErrAuthenticationFailure = errors.New("authentication failure")
+	ErrCmdParams             = errors.New("invalid command param")
+	ErrValue                 = errors.New("value is not an integer or out of range")
+	ErrSyntax                = errors.New("syntax error")
+	ErrOffset                = errors.New("offset bit is not an natural number")
+	ErrBool                  = errors.New("value is not 0 or 1")
+)
+var errScoreOverflow = errors.New("zset score overflow")
 
 type command struct {
 	Op    string `json:"op,omitempty"`
@@ -282,12 +298,35 @@ func (s *Store) ZCard(key []byte) (int64, error) {
 	return s.db.ZCard(key)
 }
 
+func (s *Store) ZCount(key []byte, min []byte, max []byte) (int64, error) {
+	minInt, maxInt, err := zparseScoreRange(min, max)
+	if err != nil {
+		return 0, ErrValue
+	}
+
+	if minInt > maxInt {
+		return 0, ErrCmdParams
+	}
+
+	return s.db.ZCount(key, minInt, maxInt)
+}
+
 func (s *Store) ZRange(key []byte, start int, stop int) ([]ledis.ScorePair, error) {
 	return s.db.ZRange(key, start, stop)
 }
 
+// key []byte, min []byte, max []byte, offset int, count int
 func (s *Store) ZRangeByScore(key []byte, min int64, max int64, offset int, count int) ([]ledis.ScorePair, error) {
 	return s.db.ZRangeByScore(key, min, max, offset, count)
+}
+
+func (s *Store) ZRangeByScoreGeneric(key []byte, min int64, max int64,
+offset int, count int, reverse bool) ([]ledis.ScorePair, error) {
+	return s.db.ZRangeByScoreGeneric(key, min, max, offset, count, reverse)
+}
+
+func (s *Store) ZScore(key, member []byte) (int64, error) {
+	return s.db.ZScore(key, member)
 }
 
 type fsmlevel Store
@@ -547,4 +586,74 @@ func readPeersJSON(path string) ([]string, error) {
 	}
 
 	return peers, nil
+}
+
+func zparseScoreRange(minBuf []byte, maxBuf []byte) (min int64, max int64, err error) {
+	if strings.ToLower(hack.String(minBuf)) == "-inf" {
+		min = math.MinInt64
+	} else {
+
+		if len(minBuf) == 0 {
+			err = ErrCmdParams
+			return
+		}
+
+		var lopen bool = false
+		if minBuf[0] == '(' {
+			lopen = true
+			minBuf = minBuf[1:]
+		}
+
+		min, err = ledis.StrInt64(minBuf, nil)
+		if err != nil {
+			err = ErrValue
+			return
+		}
+
+		if min <= ledis.MinScore || min >= ledis.MaxScore {
+			err = errScoreOverflow
+			return
+		}
+
+		if lopen {
+			min++
+		}
+	}
+
+	if strings.ToLower(hack.String(maxBuf)) == "+inf" {
+		max = math.MaxInt64
+	} else {
+		var ropen = false
+
+		if len(maxBuf) == 0 {
+			err = ErrCmdParams
+			return
+		}
+		if maxBuf[0] == '(' {
+			ropen = true
+			maxBuf = maxBuf[1:]
+		}
+
+		if maxBuf[0] == '(' {
+			ropen = true
+			maxBuf = maxBuf[1:]
+		}
+
+		max, err = ledis.StrInt64(maxBuf, nil)
+		if err != nil {
+			err = ErrValue
+			return
+		}
+
+		if max <= ledis.MinScore || max >= ledis.MaxScore {
+			err = errScoreOverflow
+			return
+		}
+
+		if ropen {
+			max--
+		}
+	}
+
+	return
 }

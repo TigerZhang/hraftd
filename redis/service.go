@@ -4,11 +4,28 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"errors"
 
 	"github.com/TigerZhang/raft"
 	redis "github.com/TigerZhang/go-redis-server"
 	"github.com/TigerZhang/ledisdb/ledis"
+	"strings"
+	"github.com/siddontang/go/hack"
+"math"
 )
+
+var (
+	ErrEmptyCommand          = errors.New("empty command")
+	ErrNotFound              = errors.New("command not found")
+	ErrNotAuthenticated      = errors.New("not authenticated")
+	ErrAuthenticationFailure = errors.New("authentication failure")
+	ErrCmdParams             = errors.New("invalid command param")
+	ErrValue                 = errors.New("value is not an integer or out of range")
+	ErrSyntax                = errors.New("syntax error")
+	ErrOffset                = errors.New("offset bit is not an natural number")
+	ErrBool                  = errors.New("value is not 0 or 1")
+)
+var errScoreOverflow = errors.New("zset score overflow")
 
 // Store is the interface Raft-backed key-value stores must implement.
 type Store interface {
@@ -27,8 +44,11 @@ type Store interface {
 
 	ZAdd(key []byte, args ...(ledis.ScorePair)) (int64, error)
 	ZCard(key []byte) (int64, error)
+	ZCount(key []byte, min []byte, max []byte) (int64, error)
 	ZRange(key []byte, start int, stop int) ([]ledis.ScorePair, error)
 	ZRangeByScore(key []byte, min int64, max int64, offset int, count int) ([]ledis.ScorePair, error)
+	ZScore(key, member []byte) (int64, error)
+	ZRangeByScoreGeneric(key []byte, min int64, max int64, offset int, count int, reverse bool) ([]ledis.ScorePair, error)
 
 	// Join joins the node, reachable at addr, to the cluster.
 	Join(addr string) error
@@ -40,6 +60,12 @@ type Service struct {
 	store Store
 	raft *raft.Raft
 }
+
+type RangeGeneric struct {
+	sp []ledis.ScorePair
+	score bool
+}
+
 
 func New(host string, port int, store Store, raft *raft.Raft) *Service {
 	return &Service{
@@ -107,7 +133,12 @@ func (h *MyHandler) ZCard(key string) (int, error) {
 	return int(num), err
 }
 
-func (h *MyHandler) ZRange(key, start, stop string) ([][]byte, error){
+func (h *MyHandler) ZCount(key, min, max string) (int, error) {
+	num, err := h.store.ZCount([]byte(key), []byte(min), []byte(max))
+	return int(num), err
+}
+
+func (h *MyHandler) ZRange(key, start, stop string, withScores...string) ([][]byte, error){
 	starti, err := strconv.ParseInt(start, 10, 32)
 	if err != nil {
 		return nil, err
@@ -120,10 +151,48 @@ func (h *MyHandler) ZRange(key, start, stop string) ([][]byte, error){
 	result := make([][]byte, 0, 16)
 	sp, err := h.store.ZRange([]byte(key), int(starti), int(stopi))
 //	fmt.Printf("zrange result: %v", sp)
+
+	var withscores bool = false
+	if len(withScores) == 1 {
+		if strings.ToLower(withScores[0]) == "withscores" {
+			withscores = true
+		}
+	}
 	for _, v := range sp {
 		result = append(result, v.Member)
+		if withscores {
+			result = append(result, []byte(fmt.Sprintf("%d", v.Score)))
+		}
 	}
 	return result, err
+}
+
+func (h *MyHandler) ZRangeByScore(args...string) ([][]byte, error) {
+	argsA := make([][]byte, 0, 16)
+	for _, v := range args {
+		argsA = append(argsA, []byte(v))
+	}
+
+	rangeGeneric, err := h.zrangeByScoreGeneric(argsA)
+
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([][]byte, 0, 16)
+	for _, v := range rangeGeneric.sp {
+		result = append(result, v.Member)
+		if rangeGeneric.score {
+			result = append(result, []byte(fmt.Sprintf("%d", v.Score)))
+		}
+	}
+
+	return result, nil
+}
+
+func (h *MyHandler) ZScore(key, member string) (int, error) {
+	num, err := h.store.ZScore([]byte(key), []byte(member))
+	return int(num), err
 }
 
 func (s *Service) Start(raft *raft.Raft) {
@@ -148,3 +217,142 @@ func (s *Service) Start(raft *raft.Raft) {
 		}
 	}()
 }
+
+func (h *MyHandler) zrangeByScoreGeneric(args [][]byte) (*RangeGeneric, error) {
+	rangeGeneric := &RangeGeneric{sp: nil, score: false}
+
+	if len(args) < 3 {
+		return rangeGeneric, ErrCmdParams
+	}
+
+	key := args[0]
+
+	var minScore, maxScore []byte
+
+	reverse := false
+	if !reverse {
+		minScore, maxScore = args[1], args[2]
+	} else {
+		minScore, maxScore = args[2], args[1]
+	}
+
+	min, max, err := zparseScoreRange(minScore, maxScore)
+
+	if err != nil {
+		return rangeGeneric, err
+	}
+
+	args = args[3:]
+
+	if len(args) > 0 {
+		if strings.ToLower(hack.String(args[0])) == "withscores" {
+			rangeGeneric.score = true
+			args = args[1:]
+		}
+	}
+
+	var offset int = 0
+	var count int = -1
+
+	if len(args) > 0 {
+		if len(args) != 3 {
+			return rangeGeneric, ErrCmdParams
+		}
+
+		if strings.ToLower(hack.String(args[0])) != "limit" {
+			return rangeGeneric, ErrSyntax
+		}
+
+		if offset, err = strconv.Atoi(hack.String(args[1])); err != nil {
+			return rangeGeneric, ErrValue
+		}
+
+		if count, err = strconv.Atoi(hack.String(args[2])); err != nil {
+			return rangeGeneric, ErrValue
+		}
+	}
+
+	if offset < 0 {
+		//for ledis, if offset < 0, a empty will return
+		//so here we directly return a empty array
+		return rangeGeneric, ErrCmdParams
+	}
+
+	if datas, err := h.store.ZRangeByScoreGeneric(key, min, max, offset, count, reverse); err != nil {
+		return rangeGeneric, err
+	} else {
+		rangeGeneric.sp = datas
+		return rangeGeneric, nil
+	}
+}
+
+func zparseScoreRange(minBuf []byte, maxBuf []byte) (min int64, max int64, err error) {
+	if strings.ToLower(hack.String(minBuf)) == "-inf" {
+		min = math.MinInt64
+	} else {
+
+		if len(minBuf) == 0 {
+			err = ErrCmdParams
+			return
+		}
+
+		var lopen bool = false
+		if minBuf[0] == '(' {
+			lopen = true
+			minBuf = minBuf[1:]
+		}
+
+		min, err = ledis.StrInt64(minBuf, nil)
+		if err != nil {
+			err = ErrValue
+			return
+		}
+
+		if min <= ledis.MinScore || min >= ledis.MaxScore {
+			err = errScoreOverflow
+			return
+		}
+
+		if lopen {
+			min++
+		}
+	}
+
+	if strings.ToLower(hack.String(maxBuf)) == "+inf" {
+		max = math.MaxInt64
+	} else {
+		var ropen = false
+
+		if len(maxBuf) == 0 {
+			err = ErrCmdParams
+			return
+		}
+		if maxBuf[0] == '(' {
+			ropen = true
+			maxBuf = maxBuf[1:]
+		}
+
+		if maxBuf[0] == '(' {
+			ropen = true
+			maxBuf = maxBuf[1:]
+		}
+
+		max, err = ledis.StrInt64(maxBuf, nil)
+		if err != nil {
+			err = ErrValue
+			return
+		}
+
+		if max <= ledis.MinScore || max >= ledis.MaxScore {
+			err = errScoreOverflow
+			return
+		}
+
+		if ropen {
+			max--
+		}
+	}
+
+	return
+}
+
