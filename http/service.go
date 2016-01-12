@@ -188,8 +188,6 @@ func (s *Service) handleXdr(w http.ResponseWriter, r *http.Request) {
 				return
 			} else {
 //				logstr := fmt.Sprint(log)
-				l := len(log.Data)
-				fmt.Printf("len: %d\n", l)
 				fmt.Fprintf(w, "i %d t %d t %d d %s", log.Index, log.Term, log.Type, log.Data[:])
 			}
 		}
