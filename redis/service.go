@@ -201,7 +201,7 @@ func (h *MyHandler) Restore(key []byte, ttl string, data []byte) error {
 		return err
 	}
 
-	fmt.Printf("Restore k %s t %s d %v\n", string(key), ttl, data)
+//	fmt.Printf("Restore k %s t %s d %v\n", string(key), ttl, data)
 	return h.store.RestoreAKey(key, ttlInt, data)
 }
 

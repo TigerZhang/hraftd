@@ -351,6 +351,7 @@ func (s *Store) RestoreAKey(key []byte, ttl int64, data []byte) error {
 }
 
 func (s *Store) Select(db int) error {
+	// FIXME: select over raft protocol instead of locally
 	_, err := s.ldb.Select(db)
 	return err
 }
@@ -477,7 +478,7 @@ func (f *fsmlevel) Apply(l *raft.Log) interface{} {
 }
 
 func (f *fsmlevel) applyRestore(key []byte, ttl int64, data []byte) interface{} {
-	fmt.Printf("applyRestore k %s t %d d %s\n", string(key), ttl, string(data))
+//	fmt.Printf("applyRestore k %s t %d d %s\n", string(key), ttl, string(data))
 
 	return f.db.Restore([]byte(key), ttl, []byte(data))
 }
