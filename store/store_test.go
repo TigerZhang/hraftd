@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+	"reflect"
+	"fmt"
 )
 
 func Test_StoreOpen(t *testing.T) {
@@ -69,4 +71,29 @@ func Test_StoreOpenSingleNode(t *testing.T) {
 		t.Fatalf("key has wrong value: %s", value)
 	}
 
+}
+
+func Test_RestoreEncodeDecode(t *testing.T) {
+	key := []byte{'1','2','3',0,'4'}
+	ttl := int64(123)
+	data := []byte{'2','3','4',0,'5'}
+	rkv := encodeRestoreKeyValue(key, ttl, data)
+
+	key2, ttl2, data2, err := decodeRestoreKeyValue(rkv)
+	if err != nil {
+		t.Fatalf("decode failed: %s", err.Error())
+	}
+
+	if !reflect.DeepEqual(key2, key) {
+		t.Fatal("key error")
+	}
+
+	if ttl2 != ttl {
+		t.Fatal("ttl error")
+	}
+
+	if !reflect.DeepEqual(data2, data) {
+		fmt.Printf("data: %v data2: %v\n", data, data2)
+		t.Fatal("data error")
+	}
 }

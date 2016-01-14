@@ -33,6 +33,7 @@ import (
 	lediscfg "github.com/TigerZhang/ledisdb/config"
 //	"github.com/siddontang/go/snappy"
 	"github.com/siddontang/go/hack"
+	"encoding/binary"
 )
 
 const (
@@ -178,6 +179,24 @@ func (s *Store) Get(key string) (string, error) {
 	return "", err
 }
 
+func (s *Store) ApplyRestore(rkv []byte) error {
+	if s.raft.State() != raft.Leader {
+		leader := s.raft.Leader()
+		return fmt.Errorf("not leader " + leader)
+	}
+
+	f := s.raft.Apply(rkv, raftTimeout)
+	if err, ok := f.(error); ok {
+		return err
+	}
+
+	if err := f.Error(); err != nil {
+		return err
+	}
+
+	return  nil
+}
+
 // Set sets the value for the given key.
 func (s *Store) Set(key, value string) error {
 	if s.raft.State() != raft.Leader {
@@ -270,6 +289,72 @@ func (s *Store) GetRaft() *raft.Raft {
 	return s.raft
 }
 
+func encodeRestoreKeyValue(key []byte, ttl int64, data []byte) []byte {
+	rkv := make([]byte, 0)
+	rkv = append(rkv, 'r')
+
+	key_len_buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(key_len_buf, uint32(len(key)))
+	rkv = append(rkv, key_len_buf...)
+
+	rkv = append(rkv, key...)
+
+	ttl_buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(ttl_buf, uint64(ttl))
+	rkv = append(rkv, ttl_buf...)
+
+	data_len_buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(data_len_buf, uint32(len(data)))
+	rkv = append(rkv, data_len_buf...)
+
+	rkv = append(rkv, data...)
+
+	return rkv
+}
+
+func decodeRestoreKeyValue(rkv []byte) ([]byte, int64, []byte, error) {
+//	fmt.Printf("rkv: %v\n", rkv)
+	if rkv[0] != 'r' {
+		return nil, 0, nil, errors.New("Exported r for restore log")
+	}
+	rkv = rkv[1:]
+
+	key_len := binary.LittleEndian.Uint32(rkv)
+	if uint32(len(rkv)) < key_len + 4 {
+		return nil, 0, nil, errors.New("Invalid restore log")
+	}
+	rkv = rkv[4:]
+	key := rkv[:key_len]
+
+	rkv = rkv[key_len:]
+
+	ttl := binary.LittleEndian.Uint64(rkv)
+	rkv = rkv[8:]
+
+	data_len := binary.LittleEndian.Uint32(rkv)
+	if uint32(len(rkv)) < data_len + 4 {
+		return nil, 0, nil, errors.New("Invalid restore log")
+	}
+	rkv = rkv[4:]
+	data := rkv[:data_len]
+
+	return key, int64(ttl), data, nil
+}
+
+func (s *Store) RestoreAKey(key []byte, ttl int64, data []byte) error {
+//	return s.db.Restore(key, ttl, data)
+//	rkv := fmt.Sprintf("r,%s,%d,%s", key, ttl, data)
+//	fmt.Printf("rkv: %v\n", []byte(rkv))
+//	return s.Set(rkv, "1")
+	rkv := encodeRestoreKeyValue(key, ttl, data)
+	return s.ApplyRestore(rkv)
+}
+
+func (s *Store) Select(db int) error {
+	_, err := s.ldb.Select(db)
+	return err
+}
+
 func (s *Store) SAdd(key, value string) (int, error) {
 	skv := fmt.Sprintf("t,%s,%s", key, value)
 	//	FIXME: return the real number
@@ -332,9 +417,19 @@ func (s *Store) ZScore(key, member []byte) (int64, error) {
 type fsmlevel Store
 
 func (f *fsmlevel) Apply(l *raft.Log) interface{} {
+	if l.Data[0] == 'r' {
+		key, ttl, data, err := decodeRestoreKeyValue(l.Data)
+		if err != nil {
+			return err
+		}
+
+		return f.applyRestore(key, ttl, data)
+	}
+
 	var c command
 	if err := json.Unmarshal(l.Data, &c); err != nil {
-		panic(fmt.Sprintf("failed to unmarshal command: %s", err.Error()))
+		fmt.Sprintf("failed to unmarshal command: %s", err.Error())
+		return nil
 	}
 
 //	f.logger.Printf("[DEBUG] fsmlevel apply log %d", l.Index)
@@ -379,6 +474,12 @@ func (f *fsmlevel) Apply(l *raft.Log) interface{} {
 	}
 
 	return nil
+}
+
+func (f *fsmlevel) applyRestore(key []byte, ttl int64, data []byte) interface{} {
+	fmt.Printf("applyRestore k %s t %d d %s\n", string(key), ttl, string(data))
+
+	return f.db.Restore([]byte(key), ttl, []byte(data))
 }
 
 func (f *fsmlevel) applyZAdd(key string, score int64, value string) interface{} {

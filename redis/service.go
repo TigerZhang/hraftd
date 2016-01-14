@@ -38,6 +38,10 @@ type Store interface {
 	// Delete removes the given key, via distributed consensus.
 	Delete(key string) error
 
+	RestoreAKey(key []byte, ttl int64, data []byte) error
+
+	Select(db int) error
+
 	SAdd(key, value string) (int, error)
 	SRem(key, value string) (int, error)
 	SMembers(key string) ([][]byte, error)
@@ -188,6 +192,25 @@ func (h *MyHandler) ZRangeByScore(args...string) ([][]byte, error) {
 	}
 
 	return result, nil
+}
+
+func (h *MyHandler) Restore(key []byte, ttl string, data []byte) error {
+	ttlInt, err := strconv.ParseInt(ttl, 10, 32)
+	if err != nil {
+		fmt.Printf("[ERROR] Restore %s\n", err.Error())
+		return err
+	}
+
+	fmt.Printf("Restore k %s t %s d %v\n", string(key), ttl, data)
+	return h.store.RestoreAKey(key, ttlInt, data)
+}
+
+func (h *MyHandler) Select(db string) error {
+	dbInt, err := strconv.ParseInt(db, 10, 32)
+	if err != nil {
+		return err
+	}
+	return h.store.Select(int(dbInt))
 }
 
 func (h *MyHandler) ZScore(key, member string) (int, error) {
