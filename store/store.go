@@ -34,6 +34,10 @@ import (
 //	"github.com/siddontang/go/snappy"
 	"github.com/siddontang/go/hack"
 	"encoding/binary"
+
+	"github.com/garyburd/redigo/redis"
+
+	"github.com/TigerZhang/hraftd/redislogstore"
 )
 
 const (
@@ -74,6 +78,8 @@ type Store struct {
 	raft *raft.Raft // The consensus mechanism
 
 	logger *log.Logger
+
+	r redis.Conn
 }
 
 // New returns a new Store.
@@ -81,6 +87,7 @@ func New() *Store {
 	return &Store{
 		m:      make(map[string]string),
 		logger: log.New(os.Stderr, "[store] ", log.LstdFlags),
+		r:		nil,
 	}
 }
 
@@ -134,9 +141,13 @@ func (s *Store) Open(enableSingle bool) error {
 		return fmt.Errorf("New leveldb store: %s", err)
 	}
 
-	logStore, err := raftleveldb.NewStore(filepath.Join(s.RaftDir, "raft-level-log.db"))
+//	logStore, err := raftleveldb.NewStore(filepath.Join(s.RaftDir, "raft-level-log.db"))
+//	if err != nil {
+//		return fmt.Errorf("New leveldb store: %s", err)
+//	}
+	logStore, err := redislogstore.NewStore("localhost:6379")
 	if err != nil {
-		return fmt.Errorf("New leveldb store: %s", err)
+		return fmt.Errorf("New redis log store: %s", err)
 	}
 
 	cfg := lediscfg.NewConfigDefault()
@@ -150,9 +161,10 @@ func (s *Store) Open(enableSingle bool) error {
 	db, _ := ldb.Select(0)
 	s.db = db
 	s.ldb = ldb
+	s.r = OpenRedis("localhost:6379")
 
 	// Instantiate the Raft systems.
-	ra, err := raft.NewRaft(config, (*fsmlevel)(s), logStore, stableStore, snapshots, peerStore, transport)
+	ra, err := raft.NewRaft(config, (*fsmredis)(s), logStore, stableStore, snapshots, peerStore, transport)
 	if err != nil {
 		return fmt.Errorf("new raft: %s", err)
 	}
@@ -167,6 +179,10 @@ func (s *Store) Get(key string) (string, error) {
 //	s.mu.Lock()
 //	defer s.mu.Unlock()
 //	return s.m[key], nil
+
+	if s.r != nil {
+		return redis.String(s.r.Do("GET", []byte(key)))
+	}
 
 	k := []byte(key)
 	value, err := s.db.Get(k)
