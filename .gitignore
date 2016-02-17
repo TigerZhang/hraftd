@@ -28,3 +28,14 @@ _testmain.go
 *.prof
 
 .idea
+bench-tmp.p
+bench.p
+benchmark.sh
+redis_test.py
+saved_start_id
+torch.svg
+redislogstore/redislogstore.iml
+redislogstore/fsm/appendonly.aof
+redislogstore/fsm/redis.conf
+redislogstore/logs/appendonly.aof
+redislogstore/logs/redis.conf

@@ -1,13 +1,14 @@
 package store
 
 import (
-	"github.com/garyburd/redigo/redis"
-	"log"
+//	"github.com/garyburd/redigo/redis"
+//	"log"
 	"github.com/TigerZhang/raft"
 	"io"
 	"fmt"
 	"encoding/json"
 	"github.com/Sirupsen/logrus"
+//	"time"
 )
 
 var logr = logrus.New()
@@ -31,14 +32,15 @@ func (f *fsmredisSnapshot) Release() {
 
 type fsmredis Store
 
-func OpenRedis(target string) redis.Conn {
-	c, err := redis.Dial("tcp", target)
-	if err != nil {
-		log.Panicf("cannot connect to '%s'", target)
-	}
-
-	return c
-}
+//func OpenRedis(target string) redis.Conn {
+////	c, err := redis.Dial("tcp", target)
+//	c, err := redis.DialTimeout("tcp", target, 3 * time.Second, 5 * time.Second, 5 * time.Second)
+//	if err != nil {
+//		log.Panicf("cannot connect to '%s'", target)
+//	}
+//
+//	return c
+//}
 
 func (f *fsmredis) Apply(l *raft.Log) interface{} {
 	logr.Debug("fsmredis apply %v", l)
@@ -58,19 +60,25 @@ func (f *fsmredis) Apply(l *raft.Log) interface{} {
 }
 
 func (f *fsmredis) applySet(key, value string) interface{} {
-	reply, err := f.r.Do("SET", key, value)
+	c := f.rpool.Get()
+	defer c.Close()
+
+//	reply, err := f.r.Do("SET", key, value)
+	reply, err := c.Do("SET", key, value)
 	if err != nil {
-		logr.Errorf("applySet failed. reply %v err %v", reply, err)
-		panic(err)
+		logr.Panicf("applySet failed. reply %v err %v", reply, err)
 	}
 	return err
 }
 
 func (f *fsmredis) applyDelete(key string) interface{} {
-	reply, err := f.r.Do("DEL", key)
+	c := f.rpool.Get()
+	defer c.Close()
+
+//	reply, err := f.r.Do("DEL", key)
+	reply, err := c.Do("DEL", key)
 	if err != nil {
-		logr.Errorf("applyDelete failed. reply %v err %v", reply, err)
-		panic(err)
+		logr.Panicf("applyDelete failed. reply %v err %v", reply, err)
 	}
 	return err
 }

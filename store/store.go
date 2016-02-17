@@ -79,7 +79,8 @@ type Store struct {
 
 	logger *log.Logger
 
-	r redis.Conn
+//	r redis.Conn
+	rpool *redis.Pool
 }
 
 // New returns a new Store.
@@ -87,7 +88,7 @@ func New() *Store {
 	return &Store{
 		m:      make(map[string]string),
 		logger: log.New(os.Stderr, "[store] ", log.LstdFlags),
-		r:		nil,
+//		r:		nil,
 	}
 }
 
@@ -161,7 +162,9 @@ func (s *Store) Open(enableSingle bool) error {
 	db, _ := ldb.Select(0)
 	s.db = db
 	s.ldb = ldb
-	s.r = OpenRedis("localhost:16380")
+//	s.r = OpenRedis("localhost:16380")
+//	s.r = redislogstore.ConnectRedis("localhost:16380", "")
+	s.rpool = redislogstore.NewRedisPool("localhost:16380", "")
 
 	// Instantiate the Raft systems.
 	ra, err := raft.NewRaft(config, (*fsmredis)(s), logStore, stableStore, snapshots, peerStore, transport)
@@ -179,9 +182,11 @@ func (s *Store) Get(key string) (string, error) {
 //	s.mu.Lock()
 //	defer s.mu.Unlock()
 //	return s.m[key], nil
+	c := s.rpool.Get()
+	defer c.Close()
 
-	if s.r != nil {
-		return redis.String(s.r.Do("GET", []byte(key)))
+	if c != nil {
+		return redis.String(c.Do("GET", []byte(key)))
 	}
 
 	k := []byte(key)

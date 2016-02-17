@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 //	"fmt"
 	"strconv"
+	"time"
 )
 
 var logr = logrus.New()
@@ -24,20 +25,18 @@ func init() {
 
 type Store struct {
 	db redis.Conn
+	rpool *redis.Pool
 
 	firstIndex uint64
 	lastIndex uint64
+
+	target string
+	password string
 }
 
 func NewStore(target string) (*Store, error) {
-	c, err := redis.Dial("tcp", target)
-	if err != nil {
-		log.Panicf("cannot connect to '%s'", target)
-	}
-
-	if err := authPassword(c, ""); err != nil {
-		return nil, err
-	}
+	c, err := ConnectRedis(target, "")
+	pool := NewRedisPool(target, "")
 
 	firstIndex, err := redis.Uint64(c.Do("GET", "FirstIndex"))
 	if err == nil {
@@ -55,9 +54,59 @@ func NewStore(target string) (*Store, error) {
 
 	return &Store{
 		db: c,
+		rpool: pool,
 		firstIndex: firstIndex,
 		lastIndex: lastIndex,
+		target: target,
+		password: "",
 	}, nil
+}
+
+func ConnectRedis(target, password string) (redis.Conn, error) {
+//	c, err := redis.Dial("tcp", target)
+	c, err := redis.DialTimeout("tcp", target, 3 * time.Second, 5 * time.Second, 5 * time.Second)
+	if err != nil {
+		log.Panicf("cannot connect to '%s'", target)
+	}
+
+	if err := authPassword(c, password); err != nil {
+		return nil, err
+	}
+
+	return c, err
+}
+
+func NewRedisPool(target, password string) *redis.Pool {
+	RedisClient := &redis.Pool{
+		// 从配置文件获取maxidle以及maxactive，取不到则用后面的默认值
+		MaxIdle:     5,
+		MaxActive:   30,
+		IdleTimeout: 180 * time.Second,
+		Dial: func() (redis.Conn, error) {
+//			c, err := redis.Dial("tcp", target)
+			c, err := redis.DialTimeout("tcp", target, 3 * time.Second, 5 * time.Second, 5 * time.Second)
+			if err != nil {
+				return nil, err
+			}
+			// 选择db
+			c.Do("SELECT", 0)
+			return c, nil
+		},
+	}
+
+	return RedisClient
+}
+
+func (s *Store) reconnectRedis() {
+	logr.Debug("reconnectRedis")
+
+	s.db.Close()
+
+	c, err := ConnectRedis(s.target, s.password)
+	if err != nil {
+		log.Panicf("reconnect redis failed %v", err)
+	}
+	s.db = c
 }
 
 // for test only
@@ -83,7 +132,10 @@ func (s *Store) Close() error {
 
 func (s *Store) FirstIndex() (uint64, error) {
 	logr.Debug("FirstIndex")
-	if firstIndex, err := redis.Uint64(s.db.Do("GET", "FirstIndex")); err != nil {
+	c := s.rpool.Get()
+	defer c.Close()
+
+	if firstIndex, err := redis.Uint64(c.Do("GET", "FirstIndex")); err != nil {
 		return 0, nil
 	} else {
 		return firstIndex, err
@@ -92,7 +144,10 @@ func (s *Store) FirstIndex() (uint64, error) {
 
 func (s *Store) LastIndex() (uint64, error) {
 	logr.Debug("LastIndex")
-	if lastIndex, err := redis.Uint64(s.db.Do("GET", "LastIndex")); err != nil {
+	c := s.rpool.Get()
+	defer c.Close()
+
+	if lastIndex, err := redis.Uint64(c.Do("GET", "LastIndex")); err != nil {
 		return 0, nil
 	} else {
 		return lastIndex, err
@@ -101,9 +156,12 @@ func (s *Store) LastIndex() (uint64, error) {
 
 func (s *Store) GetLog(index uint64, log *raft.Log) error {
 //	key := uint64ToBytes(index)
-	v, err := redis.Bytes(s.db.Do("GET", index))
+	c := s.rpool.Get()
+	defer c.Close()
+
+	v, err := redis.Bytes(c.Do("GET", index))
 //	fmt.Printf("v = %v err = %v\n", v, err)
-	logr.Debug("log: %v", v)
+	logr.Debugf("log: %v", v)
 	if err != nil {
 		return raft.ErrLogNotFound
 	}
@@ -135,27 +193,43 @@ func (s *Store) StoreLog(log *raft.Log) error {
 	cmdIndex := s.updateIndex(log.Index, true)
 	cmd = append(cmd, cmdIndex...)
 
-	if _, err := s.db.Do("MSET", cmd...); err != nil {
+	c := s.rpool.Get()
+	defer c.Close()
+
+	if _, err := c.Do("MSET", cmd...); err != nil {
+		s.reconnectRedis()
+
+		_, err = c.Do("MSET", cmd...)
+		if err != nil {
+			logr.Panicf("StoreLog failed. c %v e %v", cmd, err)
+		}
 		return err
 	}
 	return nil
 }
 
 func (s *Store) DeleteRange(min, max uint64) error {
+	c := s.rpool.Get()
+	defer c.Close()
+
 	// MDEL
 	for i := min; i<=max; i++ {
 		cmd := s.updateIndex(i, false)
+
 		if len(cmd) > 0 {
-			if _, err := s.db.Do("SET", cmd...); err != nil {
+
+			if _, err := c.Do("MSET", cmd...); err != nil {
 				//		key := uint64ToBytes(i)
-				logr.Error("Update index failed. %v", cmd)
+				logr.Errorf("Update index failed. %v %v", cmd, err)
+				s.reconnectRedis()
 				continue
 			}
 		}
 
-		if _, err := s.db.Do("DEL", i); err != nil {
+		if _, err := c.Do("DEL", i); err != nil {
 			// return err
-			logr.Error("Del log failed. i: %d", i)
+			logr.Errorf("Del log failed. i: %d %v", i, err)
+			s.reconnectRedis()
 		}
 	}
 	return nil
@@ -163,8 +237,11 @@ func (s *Store) DeleteRange(min, max uint64) error {
 
 func (s *Store) Set(key []byte, val []byte) error {
 	// SET
-	logr.Debug("set k %s v %s", string(key), string(val))
-	if _, err := s.db.Do("SET", key, val); err != nil {
+	c := s.rpool.Get()
+	defer c.Close()
+
+	logr.Debugf("set k %s v %s", string(key), string(val))
+	if _, err := c.Do("SET", key, val); err != nil {
 		return err
 	}
 
@@ -173,8 +250,11 @@ func (s *Store) Set(key []byte, val []byte) error {
 
 func (s *Store) Get(key []byte) ([]byte, error) {
 	// GET
-	logr.Debug("get k %s", string(key))
-	v, err := redis.Bytes(s.db.Do("GET", key));
+	c := s.rpool.Get()
+	defer c.Close()
+
+	logr.Debugf("get k %s", string(key))
+	v, err := redis.Bytes(c.Do("GET", key));
 	if err != nil {
 		return nil, err
 	}
