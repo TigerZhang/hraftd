@@ -8,7 +8,7 @@ import (
 )
 
 func TestLogs(t *testing.T) {
-	l, err := NewStore("localhost:6379")
+	l, err := NewStore("localhost:16379")
 	defer l.Close()
 
 	l.Flushall()

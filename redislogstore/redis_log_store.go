@@ -148,12 +148,14 @@ func (s *Store) DeleteRange(min, max uint64) error {
 		if len(cmd) > 0 {
 			if _, err := s.db.Do("SET", cmd...); err != nil {
 				//		key := uint64ToBytes(i)
+				logr.Error("Update index failed. %v", cmd)
 				continue
 			}
 		}
 
 		if _, err := s.db.Do("DEL", i); err != nil {
-			return err
+			// return err
+			logr.Error("Del log failed. i: %d", i)
 		}
 	}
 	return nil

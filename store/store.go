@@ -145,7 +145,7 @@ func (s *Store) Open(enableSingle bool) error {
 //	if err != nil {
 //		return fmt.Errorf("New leveldb store: %s", err)
 //	}
-	logStore, err := redislogstore.NewStore("localhost:6379")
+	logStore, err := redislogstore.NewStore("localhost:16379")
 	if err != nil {
 		return fmt.Errorf("New redis log store: %s", err)
 	}
@@ -161,7 +161,7 @@ func (s *Store) Open(enableSingle bool) error {
 	db, _ := ldb.Select(0)
 	s.db = db
 	s.ldb = ldb
-	s.r = OpenRedis("localhost:6379")
+	s.r = OpenRedis("localhost:16380")
 
 	// Instantiate the Raft systems.
 	ra, err := raft.NewRaft(config, (*fsmredis)(s), logStore, stableStore, snapshots, peerStore, transport)

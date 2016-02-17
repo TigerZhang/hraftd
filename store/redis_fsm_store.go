@@ -58,16 +58,26 @@ func (f *fsmredis) Apply(l *raft.Log) interface{} {
 }
 
 func (f *fsmredis) applySet(key, value string) interface{} {
-	_, err := f.r.Do("SET", key, value)
+	reply, err := f.r.Do("SET", key, value)
+	if err != nil {
+		logr.Errorf("applySet failed. reply %v err %v", reply, err)
+		panic(err)
+	}
 	return err
 }
 
 func (f *fsmredis) applyDelete(key string) interface{} {
-	_, err := f.r.Do("DEL", key)
+	reply, err := f.r.Do("DEL", key)
+	if err != nil {
+		logr.Errorf("applyDelete failed. reply %v err %v", reply, err)
+		panic(err)
+	}
 	return err
 }
 
 func (f *fsmredis) Snapshot() (raft.FSMSnapshot, error) {
+	// find latest LastIndex in AOF file of log store,
+	// check
 	return &fsmredisSnapshot{}, nil
 }
 
