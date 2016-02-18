@@ -66,7 +66,7 @@ func (f *fsmredis) applySet(key, value string) interface{} {
 //	reply, err := f.r.Do("SET", key, value)
 	reply, err := c.Do("SET", key, value)
 	if err != nil {
-		logr.Panicf("applySet failed. reply %v err %v", reply, err)
+		logr.Errorf("applySet failed. reply %v err %v", reply, err)
 	}
 	return err
 }
@@ -78,7 +78,7 @@ func (f *fsmredis) applyDelete(key string) interface{} {
 //	reply, err := f.r.Do("DEL", key)
 	reply, err := c.Do("DEL", key)
 	if err != nil {
-		logr.Panicf("applyDelete failed. reply %v err %v", reply, err)
+		logr.Errorf("applyDelete failed. reply %v err %v", reply, err)
 	}
 	return err
 }

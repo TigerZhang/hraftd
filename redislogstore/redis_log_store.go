@@ -201,7 +201,7 @@ func (s *Store) StoreLog(log *raft.Log) error {
 
 		_, err = c.Do("MSET", cmd...)
 		if err != nil {
-			logr.Panicf("StoreLog failed. c %v e %v", cmd, err)
+			logr.Errorf("StoreLog failed. c %v e %v", cmd, err)
 		}
 		return err
 	}
