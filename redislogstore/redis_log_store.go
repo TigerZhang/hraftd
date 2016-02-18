@@ -212,24 +212,33 @@ func (s *Store) DeleteRange(min, max uint64) error {
 	c := s.rpool.Get()
 	defer c.Close()
 
+	cmd := s.updateIndex(min, false)
+	if len(cmd) > 0 {
+		if _, err := c.Do("MSET", cmd...); err != nil {
+			//		key := uint64ToBytes(i)
+			logr.Errorf("Update index failed. %v %v", cmd, err)
+		}
+	}
+
+	cmd = s.updateIndex(max, false)
+	if len(cmd) > 0 {
+		if _, err := c.Do("MSET", cmd...); err != nil {
+			//		key := uint64ToBytes(i)
+			logr.Errorf("Update index failed. %v %v", cmd, err)
+		}
+	}
+
 	// MDEL
-	for i := min; i<=max; i++ {
-		cmd := s.updateIndex(i, false)
-
-		if len(cmd) > 0 {
-
-			if _, err := c.Do("MSET", cmd...); err != nil {
-				//		key := uint64ToBytes(i)
-				logr.Errorf("Update index failed. %v %v", cmd, err)
-				s.reconnectRedis()
-				continue
-			}
+	for i := min; i<=max; i += 500 {
+		indexes := make([]interface{}, 0)
+		for j := i; j<=i+500 && j<=max; j++ {
+			indexes = append(indexes, j)
 		}
 
-		if _, err := c.Do("DEL", i); err != nil {
+		if _, err := c.Do("DEL", indexes...); err != nil {
 			// return err
 			logr.Errorf("Del log failed. i: %d %v", i, err)
-			s.reconnectRedis()
+			// s.reconnectRedis()
 		}
 	}
 	return nil
@@ -278,6 +287,11 @@ func (s *Store) updateIndex(index uint64, store bool) []interface{} {
 			// delete log less than firstIndex ???
 			if index<=s.firstIndex {
 				s.firstIndex = index+1
+			} else {
+				// delete a log in middle
+				if index <= s.lastIndex {
+					s.firstIndex = index+1
+				}
 			}
 		}
 	}
@@ -291,8 +305,8 @@ func (s *Store) updateIndex(index uint64, store bool) []interface{} {
 				s.lastIndex = index
 			}
 		} else {
-			// delete log less than lastIndex
-			if index<=s.lastIndex {
+			// delete log larger than lastIndex
+			if index >= s.lastIndex {
 				s.lastIndex = index-1
 			}
 		}

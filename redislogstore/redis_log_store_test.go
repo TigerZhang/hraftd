@@ -98,15 +98,23 @@ func TestLogs(t *testing.T) {
 	}
 
 	// Delete a suffix
-	if err := l.DeleteRange(5, 20); err != nil {
+	if err := l.DeleteRange(1, 5); err != nil {
 		t.Fatalf("err: %v ", err)
 	}
 
 	// Verify they are all deleted
-	for i := 5; i <= 20; i++ {
+	for i := 1; i <= 5; i++ {
 		if err := l.GetLog(uint64(i), &out); err != raft.ErrLogNotFound {
 			t.Fatalf("err: %v ", err)
 		}
+	}
+
+	// Verfiy the prefix logs and suffix logs are available
+//	if err := l.GetLog(4, &out); err != nil {
+//		t.Fatalf("err: %v", err)
+//	}
+	if err := l.GetLog(6, &out); err != nil {
+		t.Fatalf("err: %v", err)
 	}
 
 	// Index should be one
@@ -114,14 +122,14 @@ func TestLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v ", err)
 	}
-	if idx != 1 {
+	if idx != 6 {
 		t.Fatalf("bad idx: %d", idx)
 	}
 	idx, err = l.LastIndex()
 	if err != nil {
 		t.Fatalf("err: %v ", err)
 	}
-	if idx != 4 {
+	if idx != 20 {
 		t.Fatalf("bad idx: %d", idx)
 	}
 
